@@ -1,0 +1,101 @@
+Vanilla
+Chocolate
+Strawberry
+Mint Chocolate Chip
+Cookies and Cream
+Rocky Road
+Butter Pecan
+Cookie Dough
+Neapolitan
+Pistachio
+Salted Caramel
+Coffee
+Moose Tracks
+Cherry Garcia
+Pralines and Cream
+Rainbow Sherbet
+Lemon Sorbet
+Mango
+Peach
+Blackberry
+Blueberry Cheesecake
+Peanut Butter Cup
+S'mores
+Birthday Cake
+Cotton Candy
+Bubblegum
+Tiger Stripe
+Superman
+Maple Walnut
+Toasted Coconut
+Rum Raisin
+Matcha Green Tea
+Lavender Honey
+Black Raspberry
+Banana Foster
+Cinnamon Roll
+Brown Butter
+Red Velvet
+Chai Spice
+Cardamom Rose
+Dulce de Leche
+Horchata
+Tres Leches
+Ube
+Black Sesame
+Lychee
+Passion Fruit
+Guava
+Soursop
+Taro
+Pineapple Coconut
+Watermelon
+Key Lime Pie
+Meyer Lemon
+Grapefruit Rosemary
+Raspberry Sorbet
+Orange Creamsicle
+Creamsicle Swirl
+Butterscotch
+Toffee Crunch
+Espresso Chip
+Tiramisu
+Cannoli
+Pistachio Rosewater
+Honeycomb
+Fig and Honey
+Balsamic Strawberry
+Caramel Swirl
+Fudge Brownie
+Midnight Chocolate
+Dark Chocolate Raspberry
+White Chocolate Blueberry
+Peppermint Stick
+Eggnog
+Gingerbread
+Pumpkin Spice
+Apple Cider Sorbet
+Caramel Apple
+Cinnamon Bun
+Snickerdoodle
+Funnel Cake
+Waffle Cone
+Toasted Marshmallow
+Campfire S'mores
+Peanut Butter Banana
+Nutella Swirl
+Hazelnut
+Almond Joy
+Mango Chili
+Tajin Watermelon
+Hibiscus Sorbet
+Elderflower
+Blackcurrant
+Boysenberry
+Huckleberry
+Concord Grape
+Persimmon
+Jackfruit
+Saffron
+Rosewater
+Burnt Caramel
