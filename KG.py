@@ -1,8 +1,7 @@
 import os
 import numpy as np
 import scipy.stats
-from scipy.special import logit
-from scipy.special import expit
+from scipy.special import logit, expit
 from scipy.stats import norm
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
@@ -23,137 +22,130 @@ gamma_rate        = float(os.getenv("GAMMA_RATE", 1.0))
 with open("flavors.txt", "r") as f:
     flavors = np.array([line.strip() for line in f.readlines()[:M]])
 
-# Functions
+
+# --- Single-trial helper functions (kept for reference) ---
 
 def taste(i, true_utilities, noise_std=noise_std):
     """Simulate tasting flavor i. Returns noisy observation in logit space."""
-    y = logit(true_utilities[i]) + np.random.randn() * noise_std
-    return y
+    return logit(true_utilities[i]) + np.random.randn() * noise_std
 
 def Update(theta, Sigma, a, b, r, i):
     """Bayesian update equations for our belief state after a taste.
        Updates theta and Sigma in place; returns updated (a, b)."""
-    innovation = r - theta[i]
-    h = 1 + Sigma[i, i]
-
-    theta[i] = theta[i] + Sigma[i, i] * innovation / h
+    innovation  = r - theta[i]
+    h           = 1 + Sigma[i, i]
+    theta[i]    = theta[i]    + Sigma[i, i] * innovation / h
     Sigma[i, i] = Sigma[i, i] - Sigma[i, i]**2 / h
     a = a + 0.5
     b = b + innovation**2 / (2 * h)
-
     return a, b
-
 
 def compute_all_kg(theta, Sigma, a, b):
     """Compute KG for all M flavors at once. Returns array of length M."""
-    diag = np.diag(Sigma)
-    h = 1 + diag
-    alpha = diag / h
+    diag        = np.diag(Sigma)
+    h           = 1 + diag
+    alpha       = diag / h
     sigma_tilde = alpha * np.sqrt(h * b / a)
 
-    # For each i, compute max of theta excluding i
-    # Trick: find the global best and second best
-    sorted_idx = np.argsort(-theta)
-    best_idx = sorted_idx[0]
-    second_idx = sorted_idx[1]
-
+    sorted_idx   = np.argsort(-theta)
+    best_idx     = sorted_idx[0]
+    second_idx   = sorted_idx[1]
     theta_others = np.full(len(theta), theta[best_idx])
     theta_others[best_idx] = theta[second_idx]
 
-    z = np.abs(theta - theta_others) / np.maximum(sigma_tilde, 1e-10)
-
+    z  = np.abs(theta - theta_others) / np.maximum(sigma_tilde, 1e-10)
     kg = sigma_tilde * (norm.pdf(z) - z * norm.sf(z))
     kg[sigma_tilde < 1e-10] = 0.0
-
     return kg
 
 def select_flavor(theta, kg, B, B_0):
     """Use budget-adjusted score policy to select next flavor to taste."""
-    lam = B / B_0
+    lam    = B / B_0
     scores = theta + lam * kg
     return np.argmax(scores)
 
-def run_trial(B, n_pilot, KG_selection=True):
-    """Run a trial using either KG selection policy or random selection to
-       determine the best flavor.
+
+# --- Batched trial function ---
+
+def run_trials(B, n_pilot, KG_selection=True):
+    """Run n_trials experiments in parallel using numpy batching.
 
        Inputs:
-       B = Budget
-       n_pilot = Number of pilot rounds (KG selection)
-       KG_selection = selection policy (KG if True, random if False)
+       B            = Budget
+       n_pilot      = Number of pilot rounds (KG policy only)
+       KG_selection = True → KG policy, False → random policy
 
        Returns:
-       correct = integer indicating whether best flavor correctly identified (1 yes, 0 no)
+       Array of shape (n_trials,) with 1 = correct, 0 = incorrect
+    """
+    B_0    = float(B)
+    budget = float(B)
+    batch  = np.arange(n_trials)
 
-       """
-
-    # Copy initial budget
-    B_0 = float(B)
-
-    # 1. Randomly initialize latent utilities
+    # 1. Initialize true utilities for all trials
     if M <= 20:
-        # Evenly spaced quantiles — guarantees good spread for small flavor lists (deterministic)
-        percentiles = np.linspace(0.05, 0.95, M)
-        true_utilities = scipy.stats.beta.ppf(percentiles, 2, 5)
+        # Evenly spaced quantiles — same ground truth for every trial (deterministic)
+        true_utilities = np.tile(
+            scipy.stats.beta.ppf(np.linspace(0.05, 0.95, M), 2, 5),
+            (n_trials, 1)
+        )
     else:
-        # Random draws — law of large numbers gives you a good spread for large flavor lists
-        true_utilities = np.random.beta(2, 5, size=M)
+        # Independent random draw per trial
+        true_utilities = np.random.beta(2, 5, size=(n_trials, M))
 
-    # 2. Initialize belief state for each flavor
-    theta = np.ones(M) * logit(prior_belief) # Everything operates in logit space
-    Sigma = np.eye(M) * prior_uncertainty
-    a = gamma_shape
-    b = gamma_rate
+    # 2. Initialize belief state for all trials
+    # sigma holds only the diagonal of Sigma — off-diagonals stay 0 throughout
+    theta = np.full((n_trials, M), logit(prior_belief))
+    sigma = np.full((n_trials, M), prior_uncertainty)
+    a     = np.full(n_trials, gamma_shape)
+    b     = np.full(n_trials, gamma_rate)
 
+    def observe_and_update(j):
+        """Taste flavor j[t] in each trial t and update belief state in place."""
+        nonlocal a, b
+        y          = logit(true_utilities[batch, j]) + np.random.randn(n_trials) * noise_std
+        y          = np.clip(y, logit(0.001), logit(0.999))
+        innovation = y - theta[batch, j]
+        h          = 1 + sigma[batch, j]
+        theta[batch, j] += sigma[batch, j] * innovation / h
+        sigma[batch, j] -= sigma[batch, j]**2 / h
+        a += 0.5
+        b += innovation**2 / (2 * h)
 
-    # 3. Pilot Rounds
-    for i in range(min(n_pilot, int(B))):
-        j = np.random.randint(0, M) # Select flavor randomly
-        y = taste(j, true_utilities) # Taste selected flavor
-        y = np.clip(y, logit(0.001), logit(0.999))  # clip in logit space
-        a,b = Update(theta, Sigma, a, b, y, j)
-        B = B - 1 # Each taste costs 1 unit of budget
-
-    # 4. Main Rounds
+    # 3. Pilot rounds (random selection, KG policy only)
     if KG_selection:
-        while B > 0:
-            # Flavor selection according to budget-adjusted KG policy
-            kg = compute_all_kg(theta, Sigma, a, b) # KG computation
-            j = select_flavor(theta, kg, B, B_0) # Flavor selection
-            y = taste(j, true_utilities) # Taste selected flavor
-            y = np.clip(y, logit(0.001), logit(0.999))  # clip in logit space
-            a,b = Update(theta, Sigma, a, b, y, j)
-            B = B - 1 # Each taste costs 1 unit of budget
-    else:
-        while B > 0:
-            j = np.random.randint(0, M) # Select flavor randomly
-            y = taste(j, true_utilities) # Taste selected flavor
-            y = np.clip(y, logit(0.001), logit(0.999))  # clip in logit space
-            a,b = Update(theta, Sigma, a, b, y, j)
-            B = B - 1 # Each taste costs 1 unit of budget
+        for _ in range(min(n_pilot, int(budget))):
+            observe_and_update(np.random.randint(0, M, size=n_trials))
+            budget -= 1
+
+    # 4. Main rounds
+    while budget > 0:
+        if KG_selection:
+            h_all       = 1 + sigma                                          # (n_trials, M)
+            sigma_tilde = (sigma / h_all) * np.sqrt(h_all * b[:, None] / a[:, None])
+
+            sorted_idx   = np.argsort(-theta, axis=1)
+            best_idx     = sorted_idx[:, 0]
+            second_idx   = sorted_idx[:, 1]
+            theta_others = np.broadcast_to(theta[batch, best_idx, None], (n_trials, M)).copy()
+            theta_others[batch, best_idx] = theta[batch, second_idx]
+
+            z  = np.abs(theta - theta_others) / np.maximum(sigma_tilde, 1e-10)
+            kg = sigma_tilde * (norm.pdf(z) - z * norm.sf(z))
+            kg[sigma_tilde < 1e-10] = 0.0
+
+            j = np.argmax(theta + (budget / B_0) * kg, axis=1)
+        else:
+            j = np.random.randint(0, M, size=n_trials)
+
+        observe_and_update(j)
+        budget -= 1
 
     # 5. Results
-    best_flavor = np.argmax(theta)
+    best_flavors = np.argmax(theta, axis=1)
+    true_bests   = np.argmax(true_utilities, axis=1)
+    return (best_flavors == true_bests).astype(int)
 
-    true_best = np.argmax(true_utilities)
-
-    # Determine whether algorithm correctly identified correct flavor
-    correct = False
-    if true_best == best_flavor:
-        correct = True
-
-    return int(correct)
-
-# print("\nResults:\n")
-# print(f"{'Flavor':20s} {'True':>8s} {'Believed':>8s}")
-# for i in range(M):
-#     marker = " <-- BEST" if i == best_flavor else ""
-#     print(f"{flavors[i]:20s} {true_utilities[i]:8.4f} {believed_utilities[i]:8.4f}{marker}")
-
-# true_best = np.argmax(true_utilities)
-# print(f"\nTrue best:     {flavors[true_best]}")
-# print(f"Believed best: {flavors[best_flavor]}")
-# print(f"Correct: {'YES' if best_flavor == true_best else 'NO'}")
 
 if __name__ == '__main__':
 
@@ -161,13 +153,8 @@ if __name__ == '__main__':
     random_rates = np.zeros(len(budget_list))
 
     for idx, B in enumerate(budget_list):
-        KG_successes = 0
-        random_successes = 0
-        for i in range(n_trials):
-            KG_successes     += run_trial(B, n_pilot, KG_selection=True)
-            random_successes += run_trial(B, n_pilot, KG_selection=False)
-        kg_rates[idx]     = KG_successes     / n_trials
-        random_rates[idx] = random_successes / n_trials
+        kg_rates[idx]     = run_trials(B, n_pilot, KG_selection=True).mean()
+        random_rates[idx] = run_trials(B, n_pilot, KG_selection=False).mean()
 
     # Plot
     x     = np.arange(len(budget_list))
